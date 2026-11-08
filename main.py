@@ -45,7 +45,9 @@ def health_check():
 def talk():
     # Accepts the text payload sent by your roleplay frontend
     data = request.get_json(force=True)
-    transcript = data.get("text", "Hello, I am ready.")
+    
+    # UPDATED: Checks for "input" (OpenAI format) first, falls back to "text"
+    transcript = data.get("input", data.get("text", "Hello, I am ready."))
 
     client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
     
