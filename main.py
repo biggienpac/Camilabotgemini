@@ -39,7 +39,7 @@ def generate():
         speech_config=types.SpeechConfig(
             voice_config=types.VoiceConfig(
                 prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                    voice_name="Fola"
+                    voice_name="voice_yxzcaxx6a1bs"
                 )
             )
         ),
@@ -147,6 +147,20 @@ def parse_audio_mime_type(mime_type: str) -> dict[str, int | None]:
 
 
 if __name__ == "__main__":
-    generate()
+    import os
+    from http.server import BaseHTTPRequestHandler, HTTPServer
 
+    class HealthCheckHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"Service is active and listening on port 8080!")
 
+    # Cloud Run provides the port via the PORT environment variable
+    port = int(os.environ.get("PORT", 8080))
+    server_address = ('0.0.0.0', port)
+    httpd = HTTPServer(server_address, HealthCheckHandler)
+    
+    print(f"Starting server on port {port}...")
+    httpd.serve_forever()
