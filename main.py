@@ -5,8 +5,6 @@ import mimetypes
 import os
 import re
 import struct
-from google import genai
-from google.genai import types
 
 
 def save_binary_file(file_name, data):
@@ -17,6 +15,11 @@ def save_binary_file(file_name, data):
 
 
 def generate():
+    # Moved inside the function so the server doesn't crash on startup 
+    # if the google-genai package is missing or still initializing.
+    from google import genai
+    from google.genai import types
+
     client = genai.Client(
         api_key=os.environ.get("GEMINI_API_KEY"),
     )
