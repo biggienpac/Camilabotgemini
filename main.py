@@ -6,19 +6,26 @@ from google import genai
 from google.genai import types
 
 app = Flask(__name__)
-CORS(app) # Allows web-based frontends to call this API without security blocks
+CORS(app)  # Allows web-based frontends to call this API without CORS blocks
 
 def parse_audio_mime_type(mime_type: str) -> dict[str, int | None]:
     bits_per_sample, rate = 16, 24000
+    if not mime_type:
+        return {"bits_per_sample": bits_per_sample, "rate": rate}
+    
     parts = mime_type.split(";")
     for param in parts:
         param = param.strip()
         if param.lower().startswith("rate="):
-            try: rate = int(param.split("=", 1)[1])
-            except: pass
+            try: 
+                rate = int(param.split("=", 1)[1])
+            except: 
+                pass
         elif param.startswith("audio/L"):
-            try: bits_per_sample = int(param.split("L", 1)[1])
-            except: pass
+            try: 
+                bits_per_sample = int(param.split("L", 1)[1])
+            except: 
+                pass
     return {"bits_per_sample": bits_per_sample, "rate": rate}
 
 def convert_to_wav(audio_data: bytes, mime_type: str) -> bytes:
@@ -41,16 +48,17 @@ def convert_to_wav(audio_data: bytes, mime_type: str) -> bytes:
 def health_check():
     return "Camilabot API is active and listening on port 8080!"
 
-# Route exactly matches what your roleplay frontend (RisuAI) automatically looks for
 @app.route("/v1/audio/speech", methods=["POST"])
 def talk():
-    # Accepts the text payload sent by your roleplay frontend
+    # Accepts the text payload sent by the frontend
     data = request.get_json(force=True)
     
     # Checks for "input" (OpenAI format) first, falls back to "text"
     transcript = data.get("input", data.get("text", "Hello, I am ready."))
 
-    client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+    # Initialize client; falls back to Application Default Credentials if env variable is absent
+    api_key = os.environ.get("GEMINI_API_KEY")
+    client = genai.Client(api_key=api_key) if api_key else genai.Client()
     
     # CORRECT STRUCTURE: speech_config is a direct argument of GenerateContentConfig
     config = types.GenerateContentConfig(
@@ -59,7 +67,7 @@ def talk():
         speech_config=types.SpeechConfig(
             voice_config=types.VoiceConfig(
                 prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                    voice_name="voice_yxzcaxx6a1bs"  # Your custom voice model
+                    voice_name="voice_yxzcaxx6a1bs"  # Your custom/prebuilt voice model name
                 )
             )
         ),
