@@ -52,7 +52,7 @@ def talk():
 
     client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
     
-    # Correct configuration utilizing your custom voice parameter
+    # CORRECT STRUCTURE: speech_config is a direct argument of GenerateContentConfig
     config = types.GenerateContentConfig(
         temperature=1.0,
         response_modalities=["AUDIO"],
