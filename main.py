@@ -1,44 +1,57 @@
-# To run this code you need to install the following dependencies:
-# pip install google-genai
-
-import mimetypes
 import os
-import re
 import struct
+from flask import Flask, request, Response
+from flask_cors import CORS
+from google import genai
+from google.genai import types
 
+app = Flask(__name__)
+CORS(app) # Allows web-based frontends to call this API without security blocks
 
-def save_binary_file(file_name, data):
-    f = open(file_name, "wb")
-    f.write(data)
-    f.close()
-    print(f"File saved to: {file_name}")
+def parse_audio_mime_type(mime_type: str) -> dict[str, int | None]:
+    bits_per_sample, rate = 16, 24000
+    parts = mime_type.split(";")
+    for param in parts:
+        param = param.strip()
+        if param.lower().startswith("rate="):
+            try: rate = int(param.split("=", 1)[1])
+            except: pass
+        elif param.startswith("audio/L"):
+            try: bits_per_sample = int(param.split("L", 1)[1])
+            except: pass
+    return {"bits_per_sample": bits_per_sample, "rate": rate}
 
+def convert_to_wav(audio_data: bytes, mime_type: str) -> bytes:
+    params = parse_audio_mime_type(mime_type)
+    bits, rate, channels = params["bits_per_sample"], params["rate"], 1
+    data_size = len(audio_data)
+    bytes_per_sample = bits // 8
+    block_align = channels * bytes_per_sample
+    byte_rate = rate * block_align
+    chunk_size = 36 + data_size
 
-def generate():
-    # Moved inside the function so the server doesn't crash on startup 
-    # if the google-genai package is missing or still initializing.
-    from google import genai
-    from google.genai import types
-
-    client = genai.Client(
-        api_key=os.environ.get("GEMINI_API_KEY"),
+    header = struct.pack(
+        "<4sI4s4sIHHIIHH4sI",
+        b"RIFF", chunk_size, b"WAVE", b"fmt ", 16, 1,
+        channels, rate, byte_rate, block_align, bits, b"data", data_size
     )
+    return header + audio_data
 
-    model = "gemini-3.8-flash-lite-tts"
-    contents = [
-        types.Content(
-            role="user",
-            parts=[
-                types.Part.from_text(text="""## Transcript:
-"""),
-            ],
-        ),
-    ]
-    generate_content_config = types.GenerateContentConfig(
+@app.route("/", methods=["GET"])
+def health_check():
+    return "Camilabot API is active and listening on port 8080!"
+
+@app.route("/talk", methods=["POST"])
+def talk():
+    # Accepts the text payload sent by your roleplay frontend
+    data = request.get_json(force=True)
+    transcript = data.get("text", "Hello, I am ready.")
+
+    client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+    
+    config = types.GenerateContentConfig(
         temperature=1,
-        response_modalities=[
-            "audio",
-        ],
+        response_modalities=["audio"],
         speech_config=types.SpeechConfig(
             voice_config=types.VoiceConfig(
                 prebuilt_voice_config=types.PrebuiltVoiceConfig(
@@ -50,120 +63,23 @@ def generate():
 
     audio_data = bytearray()
     mime_type = ""
+    
     for chunk in client.models.generate_content_stream(
-        model=model,
-        contents=contents,
-        config=generate_content_config,
+        model="gemini-3.8-flash-lite-tts",
+        contents=[types.Content(role="user", parts=[types.Part.from_text(text=transcript)])],
+        config=config,
     ):
-        if (
-            chunk.parts is None
-        ):
-            continue
-        if chunk.parts[0].inline_data and chunk.parts[0].inline_data.data:
-            inline_data = chunk.parts[0].inline_data
-            audio_data.extend(inline_data.data)
-            mime_type = inline_data.mime_type
-        else:
-            if text := chunk.text:
-                print(text)
-    if audio_data:
-        file_extension = mimetypes.guess_extension(mime_type)
-        data_buffer = bytes(audio_data)
-        if file_extension is None:
-            file_extension = ".wav"
-            data_buffer = convert_to_wav(bytes(audio_data), mime_type)
-        save_binary_file(f"ENTER_FILE_NAME{file_extension}", data_buffer)
+        if chunk.parts and chunk.parts[0].inline_data:
+            inline = chunk.parts[0].inline_data
+            audio_data.extend(inline.data)
+            mime_type = inline.mime_type
 
-def convert_to_wav(audio_data: bytes, mime_type: str) -> bytes:
-    """Generates a WAV file header for the given audio data and parameters.
+    if not audio_data:
+        return Response("Failed to generate audio", status=500)
 
-    Args:
-        audio_data: The raw audio data as a bytes object.
-        mime_type: Mime type of the audio data.
-
-    Returns:
-        A bytes object representing the WAV file header.
-    """
-    parameters = parse_audio_mime_type(mime_type)
-    bits_per_sample = parameters["bits_per_sample"]
-    sample_rate = parameters["rate"]
-    num_channels = 1
-    data_size = len(audio_data)
-    bytes_per_sample = bits_per_sample // 8
-    block_align = num_channels * bytes_per_sample
-    byte_rate = sample_rate * block_align
-    chunk_size = 36 + data_size  # 36 bytes for header fields before data chunk size
-
-    # http://soundfile.sapp.org/doc/WaveFormat/
-
-    header = struct.pack(
-        "<4sI4s4sIHHIIHH4sI",
-        b"RIFF",          # ChunkID
-        chunk_size,       # ChunkSize (total file size - 8 bytes)
-        b"WAVE",          # Format
-        b"fmt ",          # Subchunk1ID
-        16,               # Subchunk1Size (16 for PCM)
-        1,                # AudioFormat (1 for PCM)
-        num_channels,     # NumChannels
-        sample_rate,      # SampleRate
-        byte_rate,        # ByteRate
-        block_align,      # BlockAlign
-        bits_per_sample,  # BitsPerSample
-        b"data",          # Subchunk2ID
-        data_size         # Subchunk2Size (size of audio data)
-    )
-    return header + audio_data
-
-def parse_audio_mime_type(mime_type: str) -> dict[str, int | None]:
-    """Parses bits per sample and rate from an audio MIME type string.
-
-    Assumes bits per sample is encoded like "L16" and rate as "rate=xxxxx".
-
-    Args:
-        mime_type: The audio MIME type string (e.g., "audio/L16;rate=24000").
-
-    Returns:
-        A dictionary with "bits_per_sample" and "rate" keys. Values will be
-        integers if found, otherwise None.
-    """
-    bits_per_sample = 16
-    rate = 24000
-
-    # Extract rate from parameters
-    parts = mime_type.split(";")
-    for param in parts: # Skip the main type part
-        param = param.strip()
-        if param.lower().startswith("rate="):
-            try:
-                rate_str = param.split("=", 1)[1]
-                rate = int(rate_str)
-            except (ValueError, IndexError):
-                # Handle cases like "rate=" with no value or non-integer value
-                pass # Keep rate as default
-        elif param.startswith("audio/L"):
-            try:
-                bits_per_sample = int(param.split("L", 1)[1])
-            except (ValueError, IndexError):
-                pass # Keep bits_per_sample as default if conversion fails
-
-    return {"bits_per_sample": bits_per_sample, "rate": rate}
-
+    wav_bytes = convert_to_wav(bytes(audio_data), mime_type)
+    return Response(wav_bytes, mimetype="audio/wav")
 
 if __name__ == "__main__":
-    import os
-    from http.server import BaseHTTPRequestHandler, HTTPServer
-
-    class HealthCheckHandler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            self.send_response(200)
-            self.send_header("Content-type", "text/plain")
-            self.end_headers()
-            self.wfile.write(b"Service is active and listening on port 8080!")
-
-    # Cloud Run provides the port via the PORT environment variable
     port = int(os.environ.get("PORT", 8080))
-    server_address = ('0.0.0.0', port)
-    httpd = HTTPServer(server_address, HealthCheckHandler)
-    
-    print(f"Starting server on port {port}...")
-    httpd.serve_forever()
+    app.run(host="0.0.0.0", port=port)
