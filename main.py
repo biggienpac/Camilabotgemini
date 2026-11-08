@@ -41,12 +41,13 @@ def convert_to_wav(audio_data: bytes, mime_type: str) -> bytes:
 def health_check():
     return "Camilabot API is active and listening on port 8080!"
 
-@app.route("/talk", methods=["POST"])
+# UPDATED: Route now exactly matches what RisuAI automatically looks for
+@app.route("/v1/audio/speech", methods=["POST"])
 def talk():
     # Accepts the text payload sent by your roleplay frontend
     data = request.get_json(force=True)
     
-    # UPDATED: Checks for "input" (OpenAI format) first, falls back to "text"
+    # Checks for "input" (OpenAI format) first, falls back to "text"
     transcript = data.get("input", data.get("text", "Hello, I am ready."))
 
     client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
